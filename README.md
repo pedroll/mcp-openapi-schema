@@ -4,7 +4,9 @@ A Model Context Protocol (MCP) server that exposes OpenAPI schema information to
 
 ## Features
 
-- Load any OpenAPI schema file (JSON or YAML) specified via command line argument
+- Load OpenAPI schema from a **local file path** or **URL** (JSON or YAML) via command line argument
+- Supports specs split across multiple files with `$ref` pointers (bundled into a single document at load time)
+- Handles circular schema references safely
 - Explore API paths, operations, parameters, and schemas
 - View detailed request and response schemas
 - Look up component definitions and examples
@@ -15,17 +17,19 @@ A Model Context Protocol (MCP) server that exposes OpenAPI schema information to
 
 ### Command Line
 
-Run the MCP server with a specific schema file:
+Run the MCP server with a local schema file or a remote URL:
 
 ```bash
 # Use the default openapi.yaml in current directory
 npx -y mcp-openapi-schema
 
-# Use a specific schema file (relative path)
+# Use a local schema file (relative or absolute path)
 npx -y mcp-openapi-schema ../petstore.json
-
-# Use a specific schema file (absolute path)
 npx -y mcp-openapi-schema /absolute/path/to/api-spec.yaml
+
+# Use a remote schema URL
+npx -y mcp-openapi-schema https://example.com/openapi.yaml
+npx -y mcp-openapi-schema https://petstore3.swagger.io/api/v3/openapi.json
 
 # Show help
 npx -y mcp-openapi-schema --help
@@ -41,6 +45,10 @@ To use this MCP server with Claude Desktop, edit your `claude_desktop_config.jso
     "OpenAPI Schema": {
       "command": "npx",
       "args": ["-y", "mcp-openapi-schema", "/ABSOLUTE/PATH/TO/openapi.yaml"]
+    },
+    "Petstore API (URL)": {
+      "command": "npx",
+      "args": ["-y", "mcp-openapi-schema", "https://petstore3.swagger.io/api/v3/openapi.json"]
     }
   }
 }
@@ -61,8 +69,11 @@ To use this MCP server with Claude Code CLI, follow these steps:
    # Basic syntax
    claude mcp add openapi-schema npx -y mcp-openapi-schema
 
-   # Example with specific schema
+   # Example with local schema file
    claude mcp add petstore-api npx -y mcp-openapi-schema ~/Projects/petstore.yaml
+
+   # Example with remote schema URL
+   claude mcp add petstore-remote npx -y mcp-openapi-schema https://petstore3.swagger.io/api/v3/openapi.json
    ```
 
 2. **Verify the MCP server is registered**
@@ -104,6 +115,8 @@ The server provides the following tools for LLMs to interact with OpenAPI schema
 - `list-security-schemes`: Lists all available security schemes
 - `get-examples`: Gets examples for a specific component or endpoint
 - `search-schema`: Searches across paths, operations, and schemas
+
+**Note on `$ref` pointers**: the schema is bundled at load time, so references to external files are resolved, but cross-references within the document are kept as internal pointers (e.g. `$ref: '#/components/schemas/Pet'`). This keeps responses compact and supports circular references. To expand a pointer, call `get-component` with the referenced name.
 
 ## Examples
 

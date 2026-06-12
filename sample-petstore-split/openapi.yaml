@@ -1,0 +1,32 @@
+openapi: 3.0.0
+info:
+  title: Petstore API (split)
+  version: 1.0.0
+  description: Sample API split across multiple files via $ref pointers
+servers:
+  - url: https://petstore.example.com/api/v1
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+  /pets/{petId}:
+    $ref: './paths/pets_petId.yaml'
+components:
+  schemas:
+    Pet:
+      $ref: './components/schemas/Pet.yaml'
+    Category:
+      $ref: './components/schemas/Category.yaml'
+    NewPet:
+      $ref: './components/schemas/NewPet.yaml'
+    PetsResponse:
+      $ref: './components/schemas/PetsResponse.yaml'
+    Error:
+      $ref: './components/schemas/Error.yaml'
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authorization
+security:
+  - ApiKeyAuth: []
