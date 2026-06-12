@@ -1,0 +1,18 @@
+type: object
+required:
+  - pets
+  - total
+properties:
+  pets:
+    type: array
+    items:
+      $ref: './Pet.yaml'
+  total:
+    type: integer
+    description: Total number of pets
+  limit:
+    type: integer
+    description: Limit used in the request
+  offset:
+    type: integer
+    description: Offset used in the request

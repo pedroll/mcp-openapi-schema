@@ -5,6 +5,8 @@ A Model Context Protocol (MCP) server that exposes OpenAPI schema information to
 ## Features
 
 - Load any OpenAPI schema file (JSON or YAML) specified via command line argument
+- Supports specs split across multiple files with `$ref` pointers (bundled into a single document at load time)
+- Handles circular schema references safely
 - Explore API paths, operations, parameters, and schemas
 - View detailed request and response schemas
 - Look up component definitions and examples
@@ -104,6 +106,8 @@ The server provides the following tools for LLMs to interact with OpenAPI schema
 - `list-security-schemes`: Lists all available security schemes
 - `get-examples`: Gets examples for a specific component or endpoint
 - `search-schema`: Searches across paths, operations, and schemas
+
+**Note on `$ref` pointers**: the schema is bundled at load time, so references to external files are resolved, but cross-references within the document are kept as internal pointers (e.g. `$ref: '#/components/schemas/Pet'`). This keeps responses compact and supports circular references. To expand a pointer, call `get-component` with the referenced name.
 
 ## Examples
 

@@ -39,8 +39,17 @@ const loadSchema = async () => {
   const schemaPath = resolve(schemaArg ?? "openapi.yaml");
 
   try {
-    // Parse and validate the OpenAPI document
-    return await SwaggerParser.validate(schemaPath, { validate: { schema: false } });
+    // Report validation problems but continue — a parseable doc is still usable
+    try {
+      await SwaggerParser.validate(schemaPath, { validate: { schema: false } });
+    } catch (validationError) {
+      console.error(`Warning: schema validation failed: ${validationError.message}`);
+    }
+
+    // Bundle external $ref files into a single document with internal refs only
+    // (#/components/...); full dereferencing would turn circular schemas into
+    // circular objects that toYaml cannot dump
+    return await SwaggerParser.bundle(schemaPath);
   } catch (error) {
     console.error(`Error loading schema: ${error.message}`);
     process.exit(1);
@@ -68,6 +77,32 @@ const server = new McpServer({
 // Helper to convert objects to YAML for better readability
 const toYaml = (obj) => yaml.dump(obj, { lineWidth: 100, noRefs: true });
 
+// Look up an internal JSON pointer (e.g. "#/components/schemas/Pet") in the bundled doc
+const resolvePointer = (pointer) =>
+  pointer
+    .slice(2)
+    .split("/")
+    .map((segment) => segment.replace(/~1/g, "/").replace(/~0/g, "~"))
+    .reduce((node, segment) => (node == null ? undefined : node[segment]), openApiDoc);
+
+// Follow a node's $ref chain (cycle-safe); returns the node itself if it is not a $ref
+const resolveRef = (node) => {
+  const seen = new Set();
+  while (
+    node &&
+    typeof node === "object" &&
+    typeof node.$ref === "string" &&
+    node.$ref.startsWith("#/") &&
+    !seen.has(node.$ref)
+  ) {
+    seen.add(node.$ref);
+    const target = resolvePointer(node.$ref);
+    if (target === undefined) return node;
+    node = target;
+  }
+  return node;
+};
+
 // List all API paths and operations
 server.tool(
   "list-endpoints",
@@ -75,7 +110,8 @@ server.tool(
   () => {
     const pathMap = {};
 
-    for (const [path, pathItem] of Object.entries(openApiDoc.paths || {})) {
+    for (const [path, rawPathItem] of Object.entries(openApiDoc.paths || {})) {
+      const pathItem = resolveRef(rawPathItem);
       // Get all HTTP methods for this path
       const methods = Object.keys(pathItem).filter((key) =>
         ["get", "post", "put", "delete", "patch", "options", "head"].includes(key.toLowerCase()),
@@ -108,7 +144,7 @@ server.tool(
   "Gets detailed information about a specific API endpoint",
   { path: z.string(), method: z.string() },
   ({ path, method }) => {
-    const pathItem = openApiDoc.paths?.[path];
+    const pathItem = resolveRef(openApiDoc.paths?.[path]);
     if (!pathItem) {
       return { content: [{ type: "text", text: `Path ${path} not found` }] };
     }
@@ -149,7 +185,7 @@ server.tool(
   "Gets the request body schema for a specific endpoint",
   { path: z.string(), method: z.string() },
   ({ path, method }) => {
-    const pathItem = openApiDoc.paths?.[path];
+    const pathItem = resolveRef(openApiDoc.paths?.[path]);
     if (!pathItem) {
       return { content: [{ type: "text", text: `Path ${path} not found` }] };
     }
@@ -159,7 +195,7 @@ server.tool(
       return { content: [{ type: "text", text: `Method ${method} not found for path ${path}` }] };
     }
 
-    const requestBody = operation.requestBody;
+    const requestBody = resolveRef(operation.requestBody);
     if (!requestBody) {
       return { content: [{ type: "text", text: `No request body defined for ${method} ${path}` }] };
     }
@@ -185,7 +221,7 @@ server.tool(
     statusCode: z.string().default("200"),
   },
   ({ path, method, statusCode }) => {
-    const pathItem = openApiDoc.paths?.[path];
+    const pathItem = resolveRef(openApiDoc.paths?.[path]);
     if (!pathItem) {
       return { content: [{ type: "text", text: `Path ${path} not found` }] };
     }
@@ -200,7 +236,7 @@ server.tool(
       return { content: [{ type: "text", text: `No responses defined for ${method} ${path}` }] };
     }
 
-    const response = responses[statusCode] || responses.default;
+    const response = resolveRef(responses[statusCode] || responses.default);
     if (!response) {
       return {
         content: [
@@ -229,18 +265,18 @@ server.tool(
   "Gets the parameters for a specific path",
   { path: z.string(), method: z.string().optional() },
   ({ path, method }) => {
-    const pathItem = openApiDoc.paths?.[path];
+    const pathItem = resolveRef(openApiDoc.paths?.[path]);
     if (!pathItem) {
       return { content: [{ type: "text", text: `Path ${path} not found` }] };
     }
 
-    let parameters = [...(pathItem.parameters || [])];
+    let parameters = (pathItem.parameters || []).map(resolveRef);
 
     // If method is specified, add method-specific parameters
     if (method) {
       const operation = pathItem[method.toLowerCase()];
       if (operation && operation.parameters) {
-        parameters = [...parameters, ...operation.parameters];
+        parameters = [...parameters, ...operation.parameters.map(resolveRef)];
       }
     }
 
@@ -315,7 +351,7 @@ server.tool(
       };
     }
 
-    const component = componentType[name];
+    const component = resolveRef(componentType[name]);
     if (!component) {
       return {
         content: [
@@ -343,7 +379,8 @@ server.tool("list-security-schemes", "Lists all available security schemes", () 
   const securitySchemes = openApiDoc.components?.securitySchemes || {};
   const result = {};
 
-  for (const [name, scheme] of Object.entries(securitySchemes)) {
+  for (const [name, rawScheme] of Object.entries(securitySchemes)) {
+    const scheme = resolveRef(rawScheme);
     result[name] = {
       type: scheme.type,
       description: scheme.description,
@@ -393,14 +430,15 @@ server.tool(
         };
       }
 
-      const operation = openApiDoc.paths?.[path]?.[method.toLowerCase()];
+      const operation = resolveRef(openApiDoc.paths?.[path])?.[method.toLowerCase()];
       if (!operation) {
         return {
           content: [{ type: "text", text: `Operation ${method.toUpperCase()} ${path} not found` }],
         };
       }
 
-      if (!operation.requestBody?.content) {
+      const requestBody = resolveRef(operation.requestBody);
+      if (!requestBody?.content) {
         return {
           content: [
             { type: "text", text: `No request body defined for ${method.toUpperCase()} ${path}` },
@@ -409,7 +447,7 @@ server.tool(
       }
 
       const examples = {};
-      for (const [contentType, content] of Object.entries(operation.requestBody.content)) {
+      for (const [contentType, content] of Object.entries(requestBody.content)) {
         if (content.examples) {
           examples[contentType] = content.examples;
         } else if (content.example) {
@@ -440,7 +478,7 @@ server.tool(
         };
       }
 
-      const operation = openApiDoc.paths?.[path]?.[method.toLowerCase()];
+      const operation = resolveRef(openApiDoc.paths?.[path])?.[method.toLowerCase()];
       if (!operation) {
         return {
           content: [{ type: "text", text: `Operation ${method.toUpperCase()} ${path} not found` }],
@@ -455,9 +493,9 @@ server.tool(
         };
       }
 
-      const responseObj = statusCode
-        ? operation.responses[statusCode]
-        : Object.values(operation.responses)[0];
+      const responseObj = resolveRef(
+        statusCode ? operation.responses[statusCode] : Object.values(operation.responses)[0],
+      );
       if (!responseObj) {
         return {
           content: [
@@ -510,7 +548,7 @@ server.tool(
         };
       }
 
-      const component = openApiDoc.components?.[componentType]?.[componentName];
+      const component = resolveRef(openApiDoc.components?.[componentType]?.[componentName]);
       if (!component) {
         return {
           content: [
@@ -566,7 +604,7 @@ server.tool(
       }
 
       // Search operations within paths
-      const pathItem = openApiDoc.paths[path];
+      const pathItem = resolveRef(openApiDoc.paths[path]);
       for (const method of ["get", "post", "put", "delete", "patch", "options", "head"]) {
         const operation = pathItem[method];
         if (!operation) continue;
@@ -580,7 +618,8 @@ server.tool(
         }
 
         // Search parameters
-        for (const param of operation.parameters || []) {
+        for (const rawParam of operation.parameters || []) {
+          const param = resolveRef(rawParam);
           if (searchRegex.test(param.name || "") || searchRegex.test(param.description || "")) {
             results.parameters.push(`${param.name} (${method.toUpperCase()} ${path})`);
           }
@@ -593,7 +632,8 @@ server.tool(
     for (const [type, typeObj] of Object.entries(components)) {
       if (!typeObj || typeof typeObj !== "object") continue;
 
-      for (const [name, component] of Object.entries(typeObj)) {
+      for (const [name, rawComponent] of Object.entries(typeObj)) {
+        const component = resolveRef(rawComponent);
         if (searchRegex.test(name) || searchRegex.test(component.description || "")) {
           results.components.push(`${type}.${name}`);
         }
@@ -601,7 +641,8 @@ server.tool(
     }
 
     // Search security schemes
-    for (const [name, scheme] of Object.entries(components.securitySchemes || {})) {
+    for (const [name, rawScheme] of Object.entries(components.securitySchemes || {})) {
+      const scheme = resolveRef(rawScheme);
       if (searchRegex.test(name) || searchRegex.test(scheme.description || "")) {
         results.securitySchemes.push(name);
       }
