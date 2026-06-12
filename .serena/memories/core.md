@@ -11,6 +11,8 @@ Single-file MCP (Model Context Protocol) server exposing OpenAPI schema info to 
 - No src/ dir, no test framework, no CI, no lint/format config.
 
 ## Invariants
+- Repo is a fork of `hannesj/mcp-openapi-schema` (upstream remote: `originalForked`; our fork: `origin` = pedroll). Upstream appears unmaintained; changes are offered upstream as PRs. Fork notice in README is fork-only — never include it in upstream PR branches.
+- Schema arg may be a local path OR an http(s) URL (`isUrl` helper; URLs skip `resolve()` and are fetched by SwaggerParser, incl. relative $refs). Incorporated from upstream PR #4 (@ppspps824).
 - Schema loading (`loadSchema`): `SwaggerParser.bundle()` — NOT `validate()`/`dereference()`. Bundle keeps refs as internal `#/components/...` pointers; full dereference creates circular JS objects that crash `toYaml` (`yaml.dump` with `noRefs: true` → "Maximum call stack size exceeded"). A separate `validate()` pass only warns on stderr; it must not be the source of the returned doc.
 - `resolveRef(node)` / `resolvePointer(pointer)` helpers (next to `toYaml`): cycle-safe internal `$ref` resolution. Every tool handler resolves nodes it reads (path items, request bodies, responses, params, components, security schemes) through `resolveRef` — new handlers must do the same.
 - Tool responses are YAML text and may legitimately contain internal `$ref` pointers (documented in README; users expand via `get-component`).

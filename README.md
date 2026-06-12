@@ -1,5 +1,7 @@
 # OpenAPI Schema Model Context Protocol Server
 
+> **Note**: This repository is a fork of [hannesj/mcp-openapi-schema](https://github.com/hannesj/mcp-openapi-schema). The original project appears to be unmaintained (open pull requests have gone unattended), so this fork incorporates community pull requests and new fixes. All changes are also offered back to the original project as pull requests.
+
 A Model Context Protocol (MCP) server that exposes OpenAPI schema information to Large Language Models (LLMs) like Claude. This server allows an LLM to explore and understand OpenAPI specifications through a set of specialized tools.
 
 ## Features
