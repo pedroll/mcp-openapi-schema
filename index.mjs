@@ -18,25 +18,31 @@ if (args.includes("--help") || args.includes("-h")) {
 OpenAPI Schema Model Context Protocol Server
 
 Usage: 
-  node index.mjs [path/to/openapi.yaml]
+  node index.mjs [path-or-url]
 
 Arguments:
-  path/to/openapi.yaml  Path to the OpenAPI schema file (JSON or YAML) (optional)
-                       If not provided, defaults to openapi.yaml
+  path-or-url  Path to a local OpenAPI file (JSON or YAML), or URL of a remote schema (optional).
+               If not provided, defaults to openapi.yaml
 
 Examples:
   node index.mjs # Uses default openapi.yaml
   node index.mjs ../petstore.json # Uses petstore OpenAPI spec
   node index.mjs /absolute/path/to/api-schema.yaml
+  node index.mjs https://petstore3.swagger.io/api/v3/openapi.json
   `);
   process.exit(0);
 }
 
 const schemaArg = args[0];
 
+// True if the given string looks like an HTTP(S) URL
+const isUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s.trim());
+
 const loadSchema = async () => {
-  // Default to openapi.yaml if no argument provided
-  const schemaPath = resolve(schemaArg ?? "openapi.yaml");
+  // Default to openapi.yaml if no argument provided; URLs are passed through
+  // to SwaggerParser, which fetches them (and any relative $refs) over HTTP
+  const schemaInput = (schemaArg ?? "openapi.yaml").trim();
+  const schemaPath = isUrl(schemaInput) ? schemaInput : resolve(schemaInput);
 
   try {
     // Report validation problems but continue — a parseable doc is still usable
@@ -58,14 +64,22 @@ const loadSchema = async () => {
 
 const openApiDoc = await loadSchema();
 
-// Extract schema name from file path or from the OpenAPI info
+// Extract schema name from the OpenAPI info, or from the file path / URL
 const schemaName =
   openApiDoc.info?.title ||
   (schemaArg
-    ? schemaArg
-        .split("/")
-        .pop()
-        .replace(/\.(yaml|json)$/i, "")
+    ? (() => {
+        const s = schemaArg.trim();
+        if (isUrl(s)) {
+          try {
+            const base = new URL(s).pathname.split("/").filter(Boolean).pop() || "openapi";
+            return base.replace(/\.(yaml|yml|json)$/i, "") || "openapi";
+          } catch {
+            return "openapi";
+          }
+        }
+        return s.split("/").pop().replace(/\.(yaml|yml|json)$/i, "") || "openapi";
+      })()
     : "openapi");
 
 const server = new McpServer({
